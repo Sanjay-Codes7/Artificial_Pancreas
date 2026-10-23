@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artificial Pancreas - Glucose Calculator &amp; Monitor</title>
+<style>
+  :root{
+    --bg:#f4f7fb; --card:#ffffff; --ink:#1b2a3a; --muted:#5f7186; --line:#dbe3ec;
+    --brand:#0b6e99; --brand2:#12a59a; --warn:#d98200; --bad:#c62f3d; --ok:#1f9d55;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0e1620; --card:#17232f; --ink:#e6eef6; --muted:#93a6ba; --line:#2a3b4c; --brand:#4fb3de; --brand2:#3fd0c4; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:18px 20px;background:linear-gradient(120deg,var(--brand),var(--brand2));color:#fff}
+  header h1{margin:0;font-size:1.25rem}
+  header p{margin:4px 0 0;font-size:.85rem;opacity:.9}
+  nav{display:flex;gap:6px;padding:10px 14px;flex-wrap:wrap;background:var(--card);border-bottom:1px solid var(--line)}
+  nav button{border:1px solid var(--line);background:transparent;color:var(--ink);padding:8px 14px;border-radius:999px;cursor:pointer;font-size:.9rem}
+  nav button.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+  main{max-width:980px;margin:0 auto;padding:16px}
+  section{display:none} section.active{display:block}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h2{margin:0 0 10px;font-size:1rem}
+  label{display:block;font-size:.8rem;color:var(--muted);margin:10px 0 4px}
+  input,select{width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:.95rem}
+  button.primary{margin-top:12px;width:100%;padding:10px;border:0;border-radius:8px;background:var(--brand);color:#fff;font-size:.95rem;cursor:pointer}
+  button.ghost{margin-top:8px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--ink);cursor:pointer}
+  .big{font-size:2.2rem;font-weight:700}
+  .row{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:.92rem}
+  .row:last-child{border-bottom:0}
+  .alert{padding:10px 12px;border-radius:8px;margin-top:10px;font-size:.88rem}
+  .alert.bad{background:rgba(198,47,61,.12);color:var(--bad);border:1px solid var(--bad)}
+  .alert.warn{background:rgba(217,130,0,.12);color:var(--warn);border:1px solid var(--warn)}
+  .alert.ok{background:rgba(31,157,85,.12);color:var(--ok);border:1px solid var(--ok)}
+  table{width:100%;border-collapse:collapse;font-size:.85rem}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+  canvas{width:100%;height:220px;display:block}
+  .disclaimer{font-size:.75rem;color:var(--muted);text-align:center;padding:14px}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--muted);margin-right:6px}
+  .dot.on{background:var(--ok)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Artificial Pancreas &mdash; Glucose Calculator &amp; Monitor</h1>
+  <p>Moorthy &amp; Gang &middot; Dexathon 2026 &middot; Team ID DEX26319 &middot; Bench prototype</p>
+</header>
+<nav>
+  <button class="active" data-tab="patient">Patient</button>
+  <button data-tab="doctor">Doctor</button>
+  <button data-tab="device">Live device</button>
+</nav>
+
+<main>
+<!-- ===================== PATIENT ===================== -->
+<section id="patient" class="active">
+  <div class="grid">
+    <div class="card">
+      <h2>Dose calculator</h2>
+      <label>Current glucose (mg/dL)</label><input id="p_bg" type="number" value="150">
+      <label>Carbohydrates in meal (g)</label><input id="p_carbs" type="number" value="45">
+      <label>Fat in meal (g) &mdash; for enzyme dose</label><input id="p_fat" type="number" value="12">
+      <label>Insulin still active, IOB (U)</label><input id="p_iob" type="number" value="0" step="0.1">
+      <button class="primary" onclick="calcDose()">Calculate</button>
+      <div id="p_alert"></div>
+    </div>
+    <div class="card">
+      <h2>Result</h2>
+      <div class="row"><span>Meal insulin</span><b id="r_meal">-</b></div>
+      <div class="row"><span>Correction insulin</span><b id="r_corr">-</b></div>
+      <div class="row"><span>Minus active insulin (IOB)</span><b id="r_iob">-</b></div>
+      <div class="row"><span>Suggested total</span><span class="big" id="r_total">-</span></div>
+      <div class="row"><span>Enzyme fluid (prototype)</span><b id="r_enz">-</b></div>
+      <button class="ghost" onclick="saveEntry()">Save to log</button>
+      <button class="ghost" id="sendBtn" onclick="sendToDevice()">Send to device</button>
+      <div id="p_note" style="font-size:.8rem;color:var(--muted);margin-top:8px"></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h2>Glucose &amp; dose history</h2>
+    <canvas id="chartLog" width="900" height="220"></canvas>
+  </div>
+</section>
+
+<!-- ===================== DOCTOR ===================== -->
+<section id="doctor">
+  <div class="grid">
+    <div class="card">
+      <h2>Therapy settings</h2>
+      <label>Target glucose (mg/dL)</label><input id="d_target" type="number" value="110">
+      <label>Insulin sensitivity factor, ISF (mg/dL per U)</label><input id="d_isf" type="number" value="50">
+      <label>Insulin-to-carb ratio, ICR (g per U)</label><input id="d_icr" type="number" value="10" step="0.5">
+      <label>Enzyme ratio (ml per g fat, prototype)</label><input id="d_enz" type="number" value="0.10" step="0.01">
+      <button class="primary" onclick="saveSettings()">Save settings</button>
+      <button class="ghost" onclick="pushSettings()">Push to device</button>
+    </div>
+    <div class="card">
+      <h2>Estimate ISF / ICR from daily dose</h2>
+      <label>Total daily insulin dose, TDD (U)</label><input id="e_tdd" type="number" value="40">
+      <button class="primary" onclick="estimate()">Estimate</button>
+      <div class="row"><span>ICR (500 rule)</span><b id="e_icr">-</b></div>
+      <div class="row"><span>ISF (1800 rule)</span><b id="e_isf">-</b></div>
+      <div style="font-size:.78rem;color:var(--muted);margin-top:8px">Rules of thumb only. The treating doctor decides the final values.</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h2>Patient log</h2>
+    <div style="overflow-x:auto">
+      <table><thead><tr><th>Time</th><th>Glucose</th><th>Carbs</th><th>Fat</th><th>Insulin (U)</th><th>Enzyme (ml)</th></tr></thead>
+      <tbody id="logBody"></tbody></table>
+    </div>
+    <button class="ghost" onclick="exportCsv()">Export CSV</button>
+    <button class="ghost" onclick="clearLog()">Clear log</button>
+  </div>
+</section>
+
+<!-- ===================== DEVICE ===================== -->
+<section id="device">
+  <div class="grid">
+    <div class="card">
+      <h2>Connect to prototype</h2>
+      <label>ESP32 IP address</label><input id="ip" placeholder="e.g. 192.168.4.1">
+      <button class="primary" onclick="toggleConnect()" id="connBtn">Connect</button>
+      <div style="margin-top:10px"><span class="dot" id="dot"></span><span id="connText">Disconnected</span></div>
+      <div style="font-size:.78rem;color:var(--muted);margin-top:8px">
+        Open this page as a local file (or over http) so the browser may talk to the ESP32.
+        HTTPS pages (e.g. GitHub Pages) block http requests to the device.
+      </div>
+    </div>
+    <div class="card">
+      <h2>Live status</h2>
+      <div><span class="big" id="l_bg">--</span> <span style="color:var(--muted)">mg/dL</span></div>
+      <div class="row"><span>Trend</span><b id="l_trend">-</b></div>
+      <div class="row"><span>Predicted in 30 min</span><b id="l_pred">-</b></div>
+      <div class="row"><span>Insulin on board</span><b id="l_iob">-</b></div>
+      <div class="row"><span>Insulin today</span><b id="l_day">-</b></div>
+      <div class="row"><span>Enzyme delivered</span><b id="l_enz">-</b></div>
+      <div class="row"><span>Mode</span><b id="l_mode">-</b></div>
+      <div id="l_alert"></div>
+      <div style="font-size:.8rem;color:var(--muted);margin-top:8px" id="l_event"></div>
+      <button class="ghost" onclick="suspendDev(1)">Suspend insulin</button>
+      <button class="ghost" onclick="suspendDev(0)">Resume insulin</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h2>Live glucose</h2>
+    <canvas id="chartLive" width="900" height="220"></canvas>
+  </div>
+</section>
+</main>
+
+<div class="disclaimer">
+  Educational prototype for demonstration only. Not a medical device. Never use it to dose a real person or real insulin.
+</div>
+
+<script>
+/* ---------- storage helpers ---------- */
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+};
+let settings = store.get('ap_settings', {target:110, isf:50, icr:10, enz:0.10});
+let log = store.get('ap_log', []);
+let lastCalc = null, liveData = [], timer = null, base = '';
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('section').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  document.getElementById(b.dataset.tab).classList.add('active');
+  drawAll();
+});
+
+/* ---------- patient calculator ---------- */
+function calcDose(){
+  const bg = +p_bg.value, carbs = +p_carbs.value, fat = +p_fat.value, iob = +p_iob.value;
+  const el = document.getElementById('p_alert');
+  if (!(bg > 0)) { el.innerHTML = '<div class="alert warn">Enter a valid glucose value.</div>'; return; }
+  if (bg < 70){
+    el.innerHTML = '<div class="alert bad"><b>Low glucose.</b> No insulin. Take 15 g fast carbohydrate, recheck in 15 minutes, and tell your doctor if it keeps dropping.</div>';
+    setResult(0,0,0,0,0); lastCalc = null; return;
+  }
+  const meal = carbs / settings.icr;
+  const corr = bg > settings.target ? (bg - settings.target) / settings.isf : 0;
+  let total = Math.max(0, meal + corr - iob);
+  const cap = 5;
+  let msg = '';
+  if (total > cap){ total = cap; msg = '<div class="alert warn">Dose capped at ' + cap + ' U (safety limit). Confirm with your doctor.</div>'; }
+  else if (bg > 300) msg = '<div class="alert warn">Very high glucose. Check for ketones and contact your doctor.</div>';
+  else msg = '<div class="alert ok">Within normal calculation limits.</div>';
+  const enzMl = fat * settings.enz;
+  el.innerHTML = msg;
+  setResult(meal, corr, iob, total, enzMl);
+  lastCalc = {bg, carbs, fat, insulin: +total.toFixed(2), enzyme: +enzMl.toFixed(2)};
+}
+function setResult(meal, corr, iob, total, enz){
+  r_meal.textContent = meal.toFixed(2) + ' U';
+  r_corr.textContent = corr.toFixed(2) + ' U';
+  r_iob.textContent = '- ' + iob.toFixed(2) + ' U';
+  r_total.textContent = total.toFixed(2) + ' U';
+  r_enz.textContent = enz.toFixed(2) + ' ml';
+}
+function saveEntry(){
+  if (!lastCalc){ p_note.textContent = 'Calculate a dose first.'; return; }
+  log.push({t: new Date().toISOString(), ...lastCalc});
+  store.set('ap_log', log); p_note.textContent = 'Saved to log.'; renderLog(); drawAll();
+}
+function sendToDevice(){
+  if (!lastCalc){ p_note.textContent = 'Calculate a dose first.'; return; }
+  if (!base){ p_note.textContent = 'Connect to the device first (Live device tab).'; return; }
+  if (!confirm('Send this meal to the prototype? (' + lastCalc.carbs + ' g carbs, ' + lastCalc.fat + ' g fat)')) return;
+  fetch(base + '/meal?carbs=' + lastCalc.carbs + '&fat=' + lastCalc.fat)
+    .then(r => r.json())
+    .then(j => { p_note.textContent = j.ok ? 'Device delivered ' + j.insulinU + ' U.' : (j.msg || 'Device refused.'); })
+    .catch(() => { p_note.textContent = 'Could not reach device.'; });
+}
+
+/* ---------- doctor ---------- */
+function loadSettings(){
+  d_target.value = settings.target; d_isf.value = settings.isf;
+  d_icr.value = settings.icr; d_enz.value = settings.enz;
+}
+function saveSettings(){
+  settings = {target:+d_target.value, isf:+d_isf.value, icr:+d_icr.value, enz:+d_enz.value};
+  store.set('ap_settings', settings); alert('Settings saved.');
+}
+function pushSettings(){
+  if (!base){ alert('Connect to the device first.'); return; }
+  saveSettings();
+  fetch(base + '/settings?target=' + settings.target + '&isf=' + settings.isf + '&icr=' + settings.icr)
+    .then(() => alert('Sent to device.')).catch(() => alert('Could not reach device.'));
+}
+function estimate(){
+  const t = +e_tdd.value; if (!(t > 0)) return;
+  e_icr.textContent = (500 / t).toFixed(1) + ' g/U';
+  e_isf.textContent = (1800 / t).toFixed(0) + ' mg/dL/U';
+}
+function renderLog(){
+  logBody.innerHTML = log.slice().reverse().map(e =>
+    '<tr><td>' + new Date(e.t).toLocaleString() + '</td><td>' + e.bg + '</td><td>' + e.carbs +
+    '</td><td>' + e.fat + '</td><td>' + e.insulin + '</td><td>' + e.enzyme + '</td></tr>').join('');
+}
+function exportCsv(){
+  const rows = ['time,glucose,carbs,fat,insulin_U,enzyme_ml']
+    .concat(log.map(e => [e.t, e.bg, e.carbs, e.fat, e.insulin, e.enzyme].join(',')));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([rows.join('\n')], {type:'text/csv'}));
+  a.download = 'glucose_log.csv'; a.click();
+}
+function clearLog(){ if (confirm('Delete all log entries?')){ log = []; store.set('ap_log', log); renderLog(); drawAll(); } }
+
+/* ---------- live device ---------- */
+function toggleConnect(){
+  if (timer){ clearInterval(timer); timer = null; base = ''; setConn(false); connBtn.textContent = 'Connect'; return; }
+  const ip = document.getElementById('ip').value.trim(); if (!ip) return;
+  base = 'http://' + ip; poll(); timer = setInterval(poll, 4000); connBtn.textContent = 'Disconnect';
+}
+function setConn(on, msg){ dot.className = 'dot' + (on ? ' on' : ''); connText.textContent = msg || (on ? 'Connected' : 'Disconnected'); }
+function poll(){
+  fetch(base + '/status').then(r => r.json()).then(s => {
+    setConn(true);
+    l_bg.textContent = s.glucose.toFixed(0);
+    l_trend.textContent = (s.trend >= 0 ? '+' : '') + s.trend.toFixed(1) + ' mg/dL/min';
+    l_pred.textContent = s.predicted30.toFixed(0) + ' mg/dL';
+    l_iob.textContent = s.iob.toFixed(2) + ' U';
+    l_day.textContent = s.dailyUnits.toFixed(2) + ' U';
+    l_enz.textContent = s.enzymeMl.toFixed(2) + ' ml';
+    l_mode.textContent = s.sim ? 'Simulation' : 'Real sensor';
+    l_event.textContent = s.event;
+    l_alert.innerHTML = s.estop ? '<div class="alert bad">EMERGENCY STOP active. Reset the device.</div>'
+      : s.suspended ? '<div class="alert warn">Insulin delivery suspended.</div>'
+      : '<div class="alert ok">Closed loop running.</div>';
+    liveData.push({t: Date.now(), g: s.glucose}); if (liveData.length > 120) liveData.shift();
+    drawAll();
+  }).catch(() => setConn(false, 'Cannot reach device'));
+}
+function suspendDev(on){
+  if (!base) return;
+  fetch(base + '/suspend?on=' + on).then(poll).catch(() => {});
+}
+
+/* ---------- tiny chart (no libraries, works offline) ---------- */
+function drawChart(canvas, pts, opts){
+  const c = canvas.getContext('2d'), W = canvas.width, H = canvas.height, pad = 36;
+  c.clearRect(0, 0, W, H);
+  const css = getComputedStyle(document.documentElement);
+  const line = css.getPropertyValue('--line').trim(), ink = css.getPropertyValue('--muted').trim(), brand = css.getPropertyValue('--brand').trim();
+  const ymin = 40, ymax = 300;
+  const Y = v => H - pad - (Math.min(Math.max(v, ymin), ymax) - ymin) / (ymax - ymin) * (H - 2 * pad);
+  c.font = '12px system-ui'; c.fillStyle = ink; c.strokeStyle = line;
+  [70, 110, 180, 250].forEach(v => { c.beginPath(); c.moveTo(pad, Y(v)); c.lineTo(W - 10, Y(v)); c.stroke(); c.fillText(v, 4, Y(v) + 4); });
+  c.fillStyle = 'rgba(31,157,85,.10)'; c.fillRect(pad, Y(180), W - pad - 10, Y(70) - Y(180));
+  if (pts.length < 2){ c.fillStyle = ink; c.fillText(opts.empty, pad + 10, H / 2); return; }
+  const X = i => pad + i / (pts.length - 1) * (W - pad - 10);
+  c.strokeStyle = brand; c.lineWidth = 2.5; c.beginPath();
+  pts.forEach((p, i) => i ? c.lineTo(X(i), Y(p.g)) : c.moveTo(X(i), Y(p.g))); c.stroke();
+  c.fillStyle = brand; pts.forEach((p, i) => { if (opts.dots){ c.beginPath(); c.arc(X(i), Y(p.g), 3.5, 0, 7); c.fill(); } });
+}
+function drawAll(){
+  drawChart(chartLog, log.map(e => ({g: e.bg})), {empty: 'Save entries to see your glucose history', dots: true});
+  drawChart(chartLive, liveData, {empty: 'Connect to the device to see live glucose'});
+}
+
+loadSettings(); renderLog(); calcDose(); drawAll();
+</script>
+</body>
+</html>
